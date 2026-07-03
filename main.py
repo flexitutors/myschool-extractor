@@ -3,6 +3,7 @@ import random
 import json
 import cloudinary.uploader
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 
 # Configuration

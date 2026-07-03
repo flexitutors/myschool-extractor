@@ -4,13 +4,15 @@ import base64
 import requests
 import cloudinary.uploader
 import asyncio
+import uuid
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List
+from typing import List, Optional
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+# Load keys directly from environment
 API_KEYS = [os.environ.get(f"GEMINI_API_KEY_{i}") for i in range(1, 6) if os.environ.get(f"GEMINI_API_KEY_{i}")]
 
 def get_best_model_name(key: str) -> str:
@@ -36,38 +38,69 @@ async def process_page(file: UploadFile, key: str):
         "generationConfig": {"responseMimeType": "application/json"}
     }
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/{get_best_model_name(key)}:generateContent?key={key}"
+    url = f"https://googleapis.com{get_best_model_name(key)}:generateContent?key={key}"
     
     try:
         response = requests.post(url, json=payload, timeout=60)
         if response.status_code == 200:
-            text = response.json()['candidates'][0]['content']['parts'][0]['text']
+            text = response.json()['candidates']['content']['parts']['text']
             return json.loads(text.replace("```json", "").replace("```", "").strip()), file_bytes
         return {"year": "Unknown", "questions": []}, file_bytes
     except Exception:
         return {"year": "Unknown", "questions": []}, file_bytes
 
-@app.post("/extract-batch")
-async def extract_batch(files: List[UploadFile] = File(...)):
-    # Create tasks for all pages
-    tasks = [process_page(file, API_KEYS[i % len(API_KEYS)]) for i, file in enumerate(files)]
+@app.post("/extract")
+async def extract_data(
+    file: Optional[UploadFile] = File(None), 
+    files: Optional[List[UploadFile]] = File(None)
+):
+    """
+    Accepts incoming uploads from either 'file' (singular) or 'files' (plural/arrays),
+    merging them dynamically into a uniform processing pipeline.
+    """
+    # 1. Consolidate inputs into a single localized list
+    all_uploads = []
+    
+    if file is not None:
+        all_uploads.append(file)
+        
+    if files is not None:
+        all_uploads.extend(files)
+        
+    # 2. Raise bad request validation if no data fields were populated
+    if not all_uploads:
+        raise HTTPException(
+            status_code=400, 
+            detail="Payload error: You must provide data under 'file' or 'files' parameter keys."
+        )
+    
+    # 3. Create tasks for all extracted pages
+    tasks = [process_page(f, API_KEYS[i % len(API_KEYS)]) for i, f in enumerate(all_uploads)]
     results = await asyncio.gather(*tasks)
     
     final_output = {"year": "Unknown", "questions": []}
     
     for (data, file_bytes) in results:
         # Aggregate year
-        if data.get("year") != "Unknown": final_output["year"] = data.get("year")
+        if data.get("year") != "Unknown": 
+            final_output["year"] = data.get("year")
         
         # Process diagrams for each question in this page
         for q in data.get("questions", []):
             if q.get("has_diagram"):
-                # Handle Cloudinary
-                temp_path = f"temp_diagram.jpg"
-                with open(temp_path, "wb") as f: f.write(file_bytes)
+                unique_id = uuid.uuid4().hex
+                temp_path = f"temp_{unique_id}.jpg"
+                
+                with open(temp_path, "wb") as f: 
+                    f.write(file_bytes)
+                    
                 res = cloudinary.uploader.upload(temp_path)
                 q["diagram_url"] = res.get("secure_url")
-                os.remove(temp_path)
+                
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            else:
+                q["diagram_url"] = None
             
             final_output["questions"].append(q)
             

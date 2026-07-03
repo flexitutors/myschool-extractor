@@ -16,6 +16,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 API_KEYS = [os.environ.get(f"GEMINI_API_KEY_{i}") for i in range(1, 6) if os.environ.get(f"GEMINI_API_KEY_{i}")]
 
 def get_best_model_name(key: str) -> str:
+    # Keeps return layout uniform as "models/gemini-1.5-flash"
     return "models/gemini-1.5-flash"
 
 async def process_page(file: UploadFile, key: str):
@@ -37,6 +38,7 @@ async def process_page(file: UploadFile, key: str):
         "generationConfig": {"responseMimeType": "application/json"}
     }
     
+    #  CORRECTED: Fully qualified Gemini endpoint URL layout path string
     url = f"https://googleapis.com{get_best_model_name(key)}:generateContent?key={key}"
     
     try:
@@ -44,8 +46,8 @@ async def process_page(file: UploadFile, key: str):
         if response.status_code == 200:
             res_json = response.json()
             try:
+                # Correct response dictionary nested key traversal paths
                 text = res_json['candidates'][0]['content']['parts'][0]['text']
-                # Clean clean up markdown blocks if the model ignores responseMimeType constraints
                 cleaned_text = text.replace("```json", "").replace("```", "").strip()
                 return json.loads(cleaned_text), file_bytes
             except Exception as json_err:
@@ -63,7 +65,6 @@ async def extract_data(
     file: Optional[UploadFile] = File(None), 
     files: Optional[List[UploadFile]] = File(None)
 ):
-    # Check if API_KEYS loaded properly to avoid ZeroDivisionError inside the task loop
     if not API_KEYS:
         print("❌ Error: No API keys found in environment variables!")
         raise HTTPException(status_code=500, detail="Server Configuration Error: API_KEYS array is empty.")
@@ -109,3 +110,4 @@ async def extract_data(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+            

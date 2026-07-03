@@ -6,7 +6,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 
-# Configuration
+# Cloudinary Setup
 cloudinary.config(
   cloud_name = os.environ.get("CLOUDINARY_CLOUD_NAME"),
   api_key = os.environ.get("CLOUDINARY_API_KEY"),
@@ -15,18 +15,21 @@ cloudinary.config(
 
 app = FastAPI()
 
-# Add this block to allow browser requests
+# Allow connections from your web frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Allows all methods
-    allow_headers=["*"],  # Allows all headers
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
-# API Key Rotation Logic
-KEYS_STRING = os.environ.get("GEMINI_API_KEY")
-API_KEYS = KEYS_STRING.split(",") if KEYS_STRING else []
+# Load keys from GEMINI_API_KEY_1 to GEMINI_API_KEY_8
+API_KEYS = []
+for i in range(1, 9):
+    key = os.environ.get(f"GEMINI_API_KEY_{i}")
+    if key:
+        API_KEYS.append(key)
 
 def get_model():
     if not API_KEYS:
@@ -40,25 +43,29 @@ async def extract_data(file: UploadFile = File(...)):
     temp_filename = f"temp_{file.filename}"
     
     try:
+        # Save file locally
         with open(temp_filename, "wb") as buffer:
             buffer.write(await file.read())
         
+        # Upload to Gemini
         myfile = genai.upload_file(temp_filename)
         model = get_model()
         
+        # Prompt with Unicode/Plaintext Math instructions
         prompt = (
             "Analyze this exam question. Return JSON only: "
             "{\"has_diagram\": bool, \"year\": \"str\", \"question\": \"str\", "
             "\"options\": [\"A\", \"B\", \"C\", \"D\"], \"correct_answer\": \"str\", "
-            "\"explanation\": \"str\"}"
+            "\"explanation\": \"str\"}. "
+            "IMPORTANT: Use Unicode/plain text for all math (e.g., use 'x²', 'π', '√') "
+            "and absolutely NO LaTeX or HTML math tags."
         )
         
         response = model.generate_content([prompt, myfile])
-        # Clean response and parse
         json_text = response.text.replace("```json", "").replace("```", "").strip()
         data = json.loads(json_text)
         
-        # 3. Handle Diagram Upload
+        # Upload diagram to Cloudinary if detected
         if data.get("has_diagram"):
             upload_result = cloudinary.uploader.upload(temp_filename)
             data["diagram_url"] = upload_result.get("secure_url")
@@ -76,7 +83,7 @@ async def extract_data(file: UploadFile = File(...)):
 
 if __name__ == "__main__":
     import uvicorn
-    # DYNAMIC PORT: This tells Render exactly which port to use
+    # Use dynamic port from Render
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-  
+          

@@ -25,7 +25,7 @@ app.add_middleware(
 )
 
 # API Key Rotation Logic
-KEYS_STRING = os.environ.get("GEMINI_API_KEYS")
+KEYS_STRING = os.environ.get("GEMINI_API_KEY")
 API_KEYS = KEYS_STRING.split(",") if KEYS_STRING else []
 
 def get_model():

@@ -16,7 +16,6 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 API_KEYS = [os.environ.get(f"GEMINI_API_KEY_{i}") for i in range(1, 6) if os.environ.get(f"GEMINI_API_KEY_{i}")]
 
 def get_best_model_name(key: str) -> str:
-    # Use cached or default to avoid metadata calls on every single page
     return "models/gemini-1.5-flash"
 
 async def process_page(file: UploadFile, key: str):
@@ -43,10 +42,20 @@ async def process_page(file: UploadFile, key: str):
     try:
         response = requests.post(url, json=payload, timeout=60)
         if response.status_code == 200:
-            text = response.json()['candidates']['content']['parts']['text']
-            return json.loads(text.replace("```json", "").replace("```", "").strip()), file_bytes
-        return {"year": "Unknown", "questions": []}, file_bytes
-    except Exception:
+            res_json = response.json()
+            try:
+                text = res_json['candidates'][0]['content']['parts'][0]['text']
+                # Clean clean up markdown blocks if the model ignores responseMimeType constraints
+                cleaned_text = text.replace("```json", "").replace("```", "").strip()
+                return json.loads(cleaned_text), file_bytes
+            except Exception as json_err:
+                print(f"❌ JSON Parsing/Extraction Failed. Raw API Response: {res_json}. Error: {json_err}")
+                return {"year": "Unknown", "questions": []}, file_bytes
+        else:
+            print(f"❌ Gemini API returned non-200 status: {response.status_code}. Response: {response.text}")
+            return {"year": "Unknown", "questions": []}, file_bytes
+    except Exception as e:
+        print(f"❌ System Exception in process_page: {str(e)}")
         return {"year": "Unknown", "questions": []}, file_bytes
 
 @app.post("/extract")
@@ -54,38 +63,29 @@ async def extract_data(
     file: Optional[UploadFile] = File(None), 
     files: Optional[List[UploadFile]] = File(None)
 ):
-    """
-    Accepts incoming uploads from either 'file' (singular) or 'files' (plural/arrays),
-    merging them dynamically into a uniform processing pipeline.
-    """
-    # 1. Consolidate inputs into a single localized list
+    # Check if API_KEYS loaded properly to avoid ZeroDivisionError inside the task loop
+    if not API_KEYS:
+        print("❌ Error: No API keys found in environment variables!")
+        raise HTTPException(status_code=500, detail="Server Configuration Error: API_KEYS array is empty.")
+
     all_uploads = []
-    
     if file is not None:
         all_uploads.append(file)
-        
     if files is not None:
         all_uploads.extend(files)
         
-    # 2. Raise bad request validation if no data fields were populated
     if not all_uploads:
-        raise HTTPException(
-            status_code=400, 
-            detail="Payload error: You must provide data under 'file' or 'files' parameter keys."
-        )
+        raise HTTPException(status_code=400, detail="Payload error: You must provide data under 'file' or 'files'.")
     
-    # 3. Create tasks for all extracted pages
     tasks = [process_page(f, API_KEYS[i % len(API_KEYS)]) for i, f in enumerate(all_uploads)]
     results = await asyncio.gather(*tasks)
     
     final_output = {"year": "Unknown", "questions": []}
     
     for (data, file_bytes) in results:
-        # Aggregate year
         if data.get("year") != "Unknown": 
             final_output["year"] = data.get("year")
         
-        # Process diagrams for each question in this page
         for q in data.get("questions", []):
             if q.get("has_diagram"):
                 unique_id = uuid.uuid4().hex
@@ -109,4 +109,3 @@ async def extract_data(
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
-    

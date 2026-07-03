@@ -9,16 +9,36 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# Load keys directly from environment
+# Load keys from environment
 API_KEYS = [os.environ.get(f"GEMINI_API_KEY_{i}") for i in range(1, 6) if os.environ.get(f"GEMINI_API_KEY_{i}")]
+
+def get_best_model_name(key: str) -> str:
+    """Queries the Gemini metadata endpoint and selects a supported model."""
+    try:
+        # Corrected Metadata Endpoint
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
+        res = requests.get(url, timeout=10)
+        
+        if res.status_code == 200:
+            models_data = res.json().get("models", [])
+            # Find models that support generateContent
+            supported = [m["name"] for m in models_data if "generateContent" in m.get("supportedGenerationMethods", [])]
+            
+            # Preference hierarchy
+            for pref in ["1.5-pro", "1.5-flash", "2.0-pro"]:
+                for model in supported:
+                    if pref in model.lower():
+                        return model # returns 'models/gemini-1.5-flash' format
+            return supported[0] if supported else "models/gemini-1.5-flash"
+    except Exception as e:
+        print(f"Metadata check failed: {e}")
+    return "models/gemini-1.5-flash"
 
 @app.post("/extract")
 async def extract_data(file: UploadFile = File(...)):
-    # 1. Read file as bytes and convert to Base64
     file_bytes = await file.read()
     base64_image = base64.b64encode(file_bytes).decode('utf-8')
     
-    # 2. Prepare Payload (Strictly following the REST API structure)
     prompt = (
         "Analyze this exam question. Return JSON only with fields: "
         "has_diagram, year, question, options (list), correct_answer, explanation. "
@@ -26,54 +46,44 @@ async def extract_data(file: UploadFile = File(...)):
     )
     
     payload = {
-        "contents": [{
-            "parts": [
-                {"text": prompt},
-                {"inline_data": {"mime_type": file.content_type, "data": base64_image}}
-            ]
-        }],
+        "contents": [{"parts": [
+            {"text": prompt},
+            {"inline_data": {"mime_type": file.content_type, "data": base64_image}}
+        ]}],
         "generationConfig": {"responseMimeType": "application/json"}
     }
     
-    # 3. Rotate through keys
     last_error = "No keys available"
     for key in API_KEYS:
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-pro:generateContent?key={key}"
+            model_name = get_best_model_name(key)
+            # URL now correctly includes the 'models/' prefix returned by the metadata API
+            url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={key}"
+            
             response = requests.post(url, json=payload, timeout=45)
             
             if response.status_code == 200:
-                data = response.json()
-                text_content = data['candidates'][0]['content']['parts'][0]['text']
+                text_content = response.json()['candidates'][0]['content']['parts'][0]['text']
                 result = json.loads(text_content)
                 
-                # Handle Diagram via Cloudinary if needed
                 if result.get("has_diagram"):
-                    # Temporarily save to upload to cloudinary
                     temp_path = f"temp_{file.filename}"
-                    with open(temp_path, "wb") as f:
-                        f.write(file_bytes)
-                    upload_result = cloudinary.uploader.upload(temp_path)
-                    result["diagram_url"] = upload_result.get("secure_url")
+                    with open(temp_path, "wb") as f: f.write(file_bytes)
+                    result["diagram_url"] = cloudinary.uploader.upload(temp_path).get("secure_url")
                     os.remove(temp_path)
                 else:
                     result["diagram_url"] = None
-                    
                 return result
             else:
-                last_error = f"API Error {response.status_code}: {response.text}"
-                print(f"Key failed: {last_error}")
+                last_error = f"Status {response.status_code}: {response.text}"
                 continue
-                
         except Exception as e:
             last_error = str(e)
-            print(f"Exception: {last_error}")
             continue
             
     raise HTTPException(status_code=500, detail=f"All keys failed. Last error: {last_error}")
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
-  
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    

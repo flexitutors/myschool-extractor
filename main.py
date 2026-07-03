@@ -14,6 +14,15 @@ cloudinary.config(
 
 app = FastAPI()
 
+# Add this block to allow browser requests
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins
+    allow_credentials=True,
+    allow_methods=["*"],  # Allows all methods
+    allow_headers=["*"],  # Allows all headers
+)
+
 # API Key Rotation Logic
 KEYS_STRING = os.environ.get("GEMINI_API_KEYS")
 API_KEYS = KEYS_STRING.split(",") if KEYS_STRING else []

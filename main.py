@@ -21,7 +21,7 @@ API_KEYS = KEYS_STRING.split(",") if KEYS_STRING else []
 def get_model():
     if not API_KEYS:
         raise HTTPException(status_code=500, detail="No API keys configured.")
-    api_key = random.choice(API_KEYS)
+    api_key = random.choice(API_KEYS).strip()
     genai.configure(api_key=api_key)
     return genai.GenerativeModel('gemini-1.5-flash')
 
@@ -30,11 +30,9 @@ async def extract_data(file: UploadFile = File(...)):
     temp_filename = f"temp_{file.filename}"
     
     try:
-        # 1. Save file locally for processing
         with open(temp_filename, "wb") as buffer:
             buffer.write(await file.read())
         
-        # 2. Upload to Gemini
         myfile = genai.upload_file(temp_filename)
         model = get_model()
         
@@ -46,9 +44,11 @@ async def extract_data(file: UploadFile = File(...)):
         )
         
         response = model.generate_content([prompt, myfile])
-        data = json.loads(response.text.replace("```json", "").replace("```", "").strip())
+        # Clean response and parse
+        json_text = response.text.replace("```json", "").replace("```", "").strip()
+        data = json.loads(json_text)
         
-        # 3. Handle Diagram Upload to Cloudinary
+        # 3. Handle Diagram Upload
         if data.get("has_diagram"):
             upload_result = cloudinary.uploader.upload(temp_filename)
             data["diagram_url"] = upload_result.get("secure_url")
@@ -61,7 +61,12 @@ async def extract_data(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=str(e))
         
     finally:
-        # Cleanup
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
+
+if __name__ == "__main__":
+    import uvicorn
+    # DYNAMIC PORT: This tells Render exactly which port to use
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
   

@@ -43,7 +43,7 @@ def get_model():
     
     api_key = random.choice(API_KEYS).strip()
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel('gemini-1.5-flash')
+    return genai.GenerativeModel('gemini-2.5-flash')
 
 @app.post("/extract")
 async def extract_data(file: UploadFile = File(...)):

@@ -6,7 +6,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 
-# Cloudinary Setup
+# Cloudinary Configuration
 cloudinary.config(
   cloud_name = os.environ.get("CLOUDINARY_CLOUD_NAME"),
   api_key = os.environ.get("CLOUDINARY_API_KEY"),
@@ -23,22 +23,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# HARDCODED KEYS LIST
-# Replace the placeholder text with your actual 8 API keys
-API_KEYS = [
-    "GEMINI_API_KEY_1",
-    "GEMINI_API_KEY_2",
-    "GEMINI_API_KEY_3",
-    "GEMINI_API_KEY_4",
-    "GEMINI_API_KEY_5",
-    "GEMINI_API_KEY_6",
-    "GEMINI_API_KEY_7",
-    "GEMINI_API_KEY_8"
-]
+# Robust API Key Loading
+API_KEYS = []
+print("--- STARTING KEY LOAD ---")
+for i in range(1, 9):
+    key_name = f"GEMINI_API_KEY_{i}"
+    val = os.environ.get(key_name)
+    if val:
+        API_KEYS.append(val.strip())
+        print(f"Successfully loaded: {key_name}")
+    else:
+        print(f"Missing variable: {key_name}")
+
+print(f"Total keys loaded: {len(API_KEYS)}")
 
 def get_model():
     if not API_KEYS:
-        raise HTTPException(status_code=500, detail="No API keys defined.")
+        raise HTTPException(status_code=500, detail="No Gemini API keys found. Please check Render Environment Variables.")
+    
     api_key = random.choice(API_KEYS).strip()
     genai.configure(api_key=api_key)
     return genai.GenerativeModel('gemini-1.5-flash')
@@ -54,13 +56,14 @@ async def extract_data(file: UploadFile = File(...)):
         myfile = genai.upload_file(temp_filename)
         model = get_model()
         
+        # Enhanced Prompt for Unicode/Plaintext Math
         prompt = (
             "Analyze this exam question. Return JSON only: "
             "{\"has_diagram\": bool, \"year\": \"str\", \"question\": \"str\", "
             "\"options\": [\"A\", \"B\", \"C\", \"D\"], \"correct_answer\": \"str\", "
             "\"explanation\": \"str\"}. "
-            "IMPORTANT: Use Unicode/plain text for all math (e.g., 'x²', 'π', '√') "
-            "and NO LaTeX or HTML math tags."
+            "IMPORTANT: Use Unicode/plain text for all math symbols (e.g., 'x²', 'π', '√'). "
+            "ABSOLUTELY NO LaTeX, TeX, or HTML math tags."
         )
         
         response = model.generate_content([prompt, myfile])
@@ -86,4 +89,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-  
+      

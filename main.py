@@ -23,23 +23,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Robust API Key Loading
+# API Key Loading - Optimized for 5 keys
 API_KEYS = []
-print("--- STARTING KEY LOAD ---")
-for i in range(1, 9):
+print("--- LOADING API KEYS ---")
+for i in range(1, 6):  # Now only looks for 1 through 5
     key_name = f"GEMINI_API_KEY_{i}"
     val = os.environ.get(key_name)
     if val:
         API_KEYS.append(val.strip())
         print(f"Successfully loaded: {key_name}")
     else:
-        print(f"Missing variable: {key_name}")
+        print(f"Variable not found: {key_name}")
 
-print(f"Total keys loaded: {len(API_KEYS)}")
+print(f"Total keys ready: {len(API_KEYS)}")
 
 def get_model():
     if not API_KEYS:
-        raise HTTPException(status_code=500, detail="No Gemini API keys found. Please check Render Environment Variables.")
+        raise HTTPException(status_code=500, detail="No Gemini API keys found.")
     
     api_key = random.choice(API_KEYS).strip()
     genai.configure(api_key=api_key)
@@ -89,4 +89,4 @@ if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
-      
+          

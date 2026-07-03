@@ -39,7 +39,7 @@ async def extract_data(file: UploadFile = File(...)):
     last_error = "No keys available"
     for key in API_KEYS:
         try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-pro:generateContent?key={key}"
             response = requests.post(url, json=payload, timeout=45)
             
             if response.status_code == 200:
